@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -50,6 +51,15 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
 
   /** Fails start-up early when storage is unreachable, creating the bucket if needed. */
   async onModuleInit(): Promise<void> {
+    try {
+      await this.ensureBucket();
+    } catch (error) {
+      throw new Error(await this.explain(error), { cause: error });
+    }
+    this.logger.log('Object storage connection established');
+  }
+
+  private async ensureBucket(): Promise<void> {
     if (!(await this.bucketExists())) {
       try {
         await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
@@ -60,7 +70,26 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
         if (!(await this.bucketExists())) throw error;
       }
     }
-    this.logger.log('Object storage connection established');
+  }
+
+  /**
+   * Turns a refusal at start-up into a message an operator can act on. A
+   * refused HEAD request carries no body, so the store is asked again with a
+   * listing, whose error does say what is wrong. Keys are never logged.
+   */
+  private async explain(error: unknown): Promise<string> {
+    let detail = describeS3Error(error);
+    try {
+      await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, MaxKeys: 1 }));
+    } catch (listing) {
+      detail = describeS3Error(listing);
+    }
+    return [
+      `Object storage refused access to bucket "${this.bucket}": ${detail}.`,
+      'Check S3_ENDPOINT (the service address only, without the bucket name),',
+      'S3_BUCKET, and S3_ACCESS_KEY / S3_SECRET_KEY (for Cloudflare R2: the',
+      '"Access Key ID" and "Secret Access Key" of an R2 API token, not the token value).',
+    ].join(' ');
   }
 
   private async bucketExists(): Promise<boolean> {
@@ -129,4 +158,21 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       );
     }
   }
+}
+
+/** `InvalidArgument: Credential access key has length 40, should be 32 (HTTP 400)`. */
+export function describeS3Error(error: unknown): string {
+  const failure = error as {
+    name?: string;
+    Code?: string;
+    message?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+  const code = failure.Code ?? failure.name ?? 'Error';
+  const message =
+    failure.message && failure.message !== code && failure.message !== 'UnknownError'
+      ? `: ${failure.message}`
+      : '';
+  const status = failure.$metadata?.httpStatusCode;
+  return `${code}${message}${status ? ` (HTTP ${status})` : ''}`;
 }
