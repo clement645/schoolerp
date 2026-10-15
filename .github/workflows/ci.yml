@@ -124,9 +124,29 @@ jobs:
           retention-days: 7
 
   images:
-    name: Build production images
+    name: Build and start production images
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: edumaster
+          POSTGRES_PASSWORD: ci-only-postgres
+          POSTGRES_DB: edumaster_image
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edumaster -d edumaster_image"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+
     steps:
       - uses: actions/checkout@v4
       - name: Build API image
@@ -135,3 +155,40 @@ jobs:
         run: docker build -f apps/api/Dockerfile --target migrate -t edumaster-migrate .
       - name: Build web image
         run: docker build -f apps/web/Dockerfile -t edumaster-web .
+
+      - name: Start object storage
+        run: |
+          docker run -d --name storage -p 9100:7070 \
+            -e ROOT_ACCESS_KEY=ci-only-access -e ROOT_SECRET_KEY=ci-only-storage-secret \
+            versity/versitygw:latest --port :7070 posix /tmp
+          sleep 3
+
+      # The API image as a host without a release step runs it: against an
+      # empty database, applying migrations on start, then serving requests.
+      - name: Start the API image on an empty database
+        run: |
+          docker run -d --name api --network host \
+            -e MIGRATE_ON_START=true \
+            -e DATABASE_URL=postgresql://edumaster:ci-only-postgres@127.0.0.1:5432/edumaster_image \
+            -e REDIS_URL=redis://127.0.0.1:6379 \
+            -e S3_ENDPOINT=http://127.0.0.1:9100 -e S3_BUCKET=edumaster-image \
+            -e S3_ACCESS_KEY=ci-only-access -e S3_SECRET_KEY=ci-only-storage-secret \
+            -e JWT_ACCESS_SECRET=ci-only-jwt-secret-not-used-anywhere-else-0123456789 \
+            -e CORS_ORIGINS=https://school.example.com -e API_HOST=127.0.0.1 \
+            edumaster-api
+          for attempt in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4000/api/v1/health && exit 0
+            sleep 2
+          done
+          docker logs api
+          exit 1
+
+      - name: Restart it; migrations are not applied twice
+        run: |
+          docker restart api
+          for attempt in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:4000/api/v1/health && break
+            sleep 2
+          done
+          docker logs api 2>&1 | grep -q "No pending migrations" || { docker logs api; exit 1; }
+          curl -sf http://127.0.0.1:4000/api/v1/health

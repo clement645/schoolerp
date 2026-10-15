@@ -20,6 +20,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Applies pending migrations before the API starts (the free plan has
+      # no separate pre-deploy step).
+      - key: MIGRATE_ON_START
+        value: 'true'
       - key: API_HOST
         value: 0.0.0.0
       # Render routes traffic to $PORT.

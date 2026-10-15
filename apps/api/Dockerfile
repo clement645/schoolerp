@@ -47,6 +47,11 @@ WORKDIR /repo/apps/api
 COPY --from=dependencies --chown=node:node /repo/node_modules /repo/node_modules
 COPY --from=dependencies --chown=node:node /repo/apps/api/node_modules /repo/apps/api/node_modules
 COPY --from=build --chown=node:node /repo/apps/api/dist ./dist
+# What `prisma migrate deploy` needs when MIGRATE_ON_START=true: the schema,
+# the migrations, the configuration and the engine fetched during the build.
+COPY --from=build --chown=node:node /repo/node_modules/@prisma/engines /repo/node_modules/@prisma/engines
+COPY --chown=node:node apps/api/prisma ./prisma
+COPY --chown=node:node apps/api/prisma.config.ts apps/api/docker-entrypoint.sh ./
 # Fonts embedded in generated PDFs (SIL Open Font License, see assets/fonts/OFL.txt).
 COPY --chown=node:node apps/api/assets ./assets
 COPY --chown=node:node apps/api/package.json ./
@@ -57,4 +62,4 @@ EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.API_PORT+'/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "dist/main.js"]
+CMD ["./docker-entrypoint.sh"]
