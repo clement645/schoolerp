@@ -1,0 +1,73 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+/*
+ * Design tokens. Every colour, radius and shadow used by the UI comes from
+ * here, so the product can be re-themed in one place. Tailwind exposes each
+ * token as utilities (e.g. `bg-primary`, `text-fg-muted`, `shadow-card`).
+ */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand */
+  --color-primary: #0b6b3a;
+  --color-primary-dark: #064d2a;
+  --color-primary-light: #e8f5ed;
+
+  /* Surfaces */
+  --color-background: #f7f9fc;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+
+  /* Text */
+  --color-fg: #172b26;
+  --color-fg-muted: #64748b;
+
+  /* Borders */
+  --color-line: #e5e7eb;
+
+  /* Status */
+  --color-success: #16a34a;
+  --color-warning: #f59e0b;
+  --color-danger: #dc2626;
+  --color-info: #2563eb;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 1px 3px 0 rgb(16 24 40 / 0.06);
+  --shadow-overlay: 0 20px 40px -8px rgb(16 24 40 / 0.2);
+
+  /* Shape */
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+}
+
+@layer base {
+  html {
+    @apply bg-background text-fg antialiased;
+  }
+
+  h1 {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+
+  h2 {
+    @apply text-lg font-semibold tracking-tight;
+  }
+
+  h3 {
+    @apply text-base font-semibold;
+  }
+}
+
+@layer components {
+  /* Shared shell for text inputs and selects. */
+  .form-control {
+    @apply border-line bg-surface text-fg rounded-control placeholder:text-fg-muted/70 block h-10 w-full border px-3 text-sm transition-colors;
+    @apply focus:border-primary focus:ring-primary/20 focus:ring-2 focus:outline-none;
+    @apply disabled:bg-surface-muted disabled:text-fg-muted disabled:cursor-not-allowed;
+  }
+
+  .form-control[aria-invalid='true'] {
+    @apply border-danger focus:border-danger focus:ring-danger/20;
+  }
+}

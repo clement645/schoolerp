@@ -1,0 +1,17 @@
+# Keep build contexts small and secrets out of images.
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.git
+.github
+.env
+.env.*
+!.env.example
+!.env.production.example
+docs
+backups
+apps/web/e2e
+e2e
+playwright-report
+test-results

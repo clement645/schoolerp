@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+*.tsbuildinfo
+
+# Generated Prisma client (rebuilt by `npm run db:generate`)
+apps/api/src/generated/
+
+# Environment — never commit real configuration
+.env
+.env.*
+!.env.production.example
+!.env.example
+
+# Tooling
+.eslintcache
+.vite/
+*.log
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+
+# Database and file backups (personal data)
+backups/
+
+# Playwright
+test-results/
+playwright-report/

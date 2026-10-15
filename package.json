@@ -1,0 +1,49 @@
+{
+  "name": "edumaster-pro",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EduMaster Pro \u2014 multi-tenant school management platform",
+  "license": "UNLICENSED",
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24.12.0",
+    "npm": ">=11"
+  },
+  "scripts": {
+    "setup": "node scripts/setup-env.mjs",
+    "postinstall": "npm run db:generate",
+    "dev": "run-p dev:api dev:web",
+    "dev:api": "npm run start:dev -w @edumaster/api",
+    "dev:web": "npm run dev -w @edumaster/web",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @edumaster/api",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:up": "docker compose up -d --wait postgres redis storage",
+    "infra:down": "docker compose down",
+    "db:generate": "npm run prisma:generate -w @edumaster/api",
+    "db:migrate": "npm run prisma:migrate:dev -w @edumaster/api",
+    "db:deploy": "npm run prisma:migrate:deploy -w @edumaster/api",
+    "e2e": "playwright test -c e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@playwright/test": "^1.63.0",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "~10.11.0",
+    "globals": "^17.0.0",
+    "npm-run-all2": "^9.0.3",
+    "prettier": "^3.9.0",
+    "typescript": "~6.0.0",
+    "typescript-eslint": "^8.71.0",
+    "vue-eslint-parser": "^10.4.1"
+  }
+}

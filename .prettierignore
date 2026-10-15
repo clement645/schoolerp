@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+package-lock.json
+apps/api/src/generated
+apps/api/prisma/migrations
+
+# Written by the browser tests at run time
+e2e/.state
+test-results
+playwright-report
+backups

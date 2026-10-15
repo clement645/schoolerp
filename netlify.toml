@@ -1,0 +1,14 @@
+# Netlify hosts the web application only. The API runs elsewhere (it is a
+# long-running Node server) and is reached through Netlify at /api, so the
+# browser sees one origin: the sign-in cookie works and no CORS is needed.
+#
+# Required site environment variable:
+#   API_ORIGIN   https address of the API, e.g. https://edumaster-api.onrender.com
+# See docs/deployment.md, "Netlify + a hosted API".
+
+[build]
+  command = "npm run build -w @edumaster/web && node scripts/netlify-routes.mjs"
+  publish = "apps/web/dist"
+
+[build.environment]
+  VITE_API_BASE_URL = "/api/v1"

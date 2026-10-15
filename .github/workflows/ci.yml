@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: edumaster
+          POSTGRES_PASSWORD: ci-only-postgres
+          POSTGRES_DB: edumaster_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edumaster -d edumaster_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    # Throwaway credentials for the ephemeral service containers above.
+    env:
+      NODE_ENV: test
+      CORS_ORIGINS: http://localhost:5180
+      DATABASE_URL: postgresql://edumaster:ci-only-postgres@127.0.0.1:5432/edumaster_ci?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_ACCESS_SECRET: ci-only-jwt-secret-not-used-anywhere-else-0123456789
+      S3_ENDPOINT: http://127.0.0.1:9100
+      S3_BUCKET: edumaster-ci
+      S3_ACCESS_KEY: ci-only-access
+      S3_SECRET_KEY: ci-only-storage-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Service containers cannot be given a command, so the S3 gateway is
+      # started as a step. The API creates its bucket on start-up.
+      - name: Start object storage
+        run: |
+          mkdir -p "$RUNNER_TEMP/storage"
+          docker run -d --name storage -p 9100:7070 \
+            -e ROOT_ACCESS_KEY="$S3_ACCESS_KEY" -e ROOT_SECRET_KEY="$S3_SECRET_KEY" \
+            -v "$RUNNER_TEMP/storage:/data" \
+            versity/versitygw:latest --port :7070 posix /data
+          for attempt in $(seq 1 20); do
+            curl -s -o /dev/null http://127.0.0.1:9100/ && exit 0
+            sleep 1
+          done
+          docker logs storage
+          exit 1
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Apply database migrations
+        run: npm run db:deploy
+
+      - name: Unit tests
+        run: npm test
+
+      # Creates and migrates its own `<database>_test` database.
+      - name: API end-to-end tests
+        run: npm run test:e2e
+
+      - name: Build
+        run: npm run build
+
+      - name: Install browser for end-to-end tests
+        run: npx playwright install --with-deps chromium
+
+      # Starts the API and web application itself, on the `_test` database.
+      - name: Browser end-to-end tests
+        run: npm run e2e
+        env:
+          # The servers under test run as in development.
+          NODE_ENV: development
+
+      - name: Upload browser test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+
+  images:
+    name: Build production images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -f apps/api/Dockerfile --target runtime -t edumaster-api .
+      - name: Build migration image
+        run: docker build -f apps/api/Dockerfile --target migrate -t edumaster-migrate .
+      - name: Build web image
+        run: docker build -f apps/web/Dockerfile -t edumaster-web .

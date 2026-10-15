@@ -1,0 +1,143 @@
+# Production stack on a single host: web (Nginx) → API → PostgreSQL, Redis and
+# S3-compatible storage. See docs/deployment.md.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Only the web container publishes a port. Put TLS in front of it.
+#
+# Where the build host cannot reach package registries through Docker's bridge
+# network, set DOCKER_BUILD_NETWORK=host for the build.
+name: edumaster-prod
+
+x-api-environment: &api-environment
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://storage:7070}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+  JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+  REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-7}
+  COOKIE_SECURE: ${COOKIE_SECURE:-true}
+  CORS_ORIGINS: ${PUBLIC_URL:?PUBLIC_URL is required, e.g. https://school.example.com}
+  SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-300}
+  RATE_LIMIT_LOGIN_PER_MINUTE: ${RATE_LIMIT_LOGIN_PER_MINUTE:-10}
+  # Nginx in the web container is the one proxy in front of the API. Raise
+  # this by one for each further proxy that sets X-Forwarded-For.
+  TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+  MPESA_ENVIRONMENT: ${MPESA_ENVIRONMENT:-production}
+  MPESA_CONSUMER_KEY: ${MPESA_CONSUMER_KEY:-}
+  MPESA_CONSUMER_SECRET: ${MPESA_CONSUMER_SECRET:-}
+  MPESA_SHORTCODE: ${MPESA_SHORTCODE:-}
+  MPESA_PASSKEY: ${MPESA_PASSKEY:-}
+  MPESA_CALLBACK_BASE_URL: ${MPESA_CALLBACK_BASE_URL:-}
+  MPESA_CALLBACK_SECRET: ${MPESA_CALLBACK_SECRET:-}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ['sh', '-c', 'exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Remove this service and set S3_ENDPOINT when using an external
+  # S3-compatible store (and start with `--scale storage=0`, or delete the
+  # `depends_on` entry below).
+  storage:
+    image: versity/versitygw:latest
+    restart: unless-stopped
+    command: ['--port', ':7070', 'posix', '/data']
+    environment:
+      ROOT_ACCESS_KEY: ${S3_ACCESS_KEY}
+      ROOT_SECRET_KEY: ${S3_SECRET_KEY}
+    volumes:
+      - storage_data:/data
+
+  # Applies pending database migrations, then exits. The API waits for it.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+      network: ${DOCKER_BUILD_NETWORK:-default}
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+      network: ${DOCKER_BUILD_NETWORK:-default}
+    restart: unless-stopped
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      storage:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: api:4000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # Bound to localhost by default: publish it through your TLS proxy.
+      - '${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
